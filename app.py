@@ -1143,12 +1143,11 @@ submitted alongside this demo.
 - Explore sensitivity to service-window length (5/10/30 min)
 - Explore time-of-day, capital cost, and borrow-vs-wire trade-offs
 
-> **Current recommended buffers** (default parameters, joint p=0.1%):
-> - **USD: \$402,772**
-> - **MXN: 5,147,276 MXN** (≈ \$294,130 USD-equivalent)
-> - **Total locked capital: \$696,902**
+> **Final recommended buffer numbers** appear in Section 3 below (after the
+> Monte Carlo validation) and update live as you change the sliders.
 >
-> Numbers above use Bonferroni p/2 + running max within window (see PDF Section 2 for derivation).
+> At the default case parameters (T=10 min, joint p=0.1%, λ_MX→US=3, λ_US→MX=2.5,
+> median \$8K, σ=0.7), the recommendation is **USD \$402K + MXN 5.15M (≈ \$697K total)**.
 
 ⚠️ **Note on parameters**: defaults are illustrative; production would calibrate
 to real MexChange transaction history.
@@ -1349,42 +1348,103 @@ to real MexChange transaction history.
     st.markdown("##### 🎯 Final recommended sizing (Bonferroni p/2 + running max)")
     st.caption(
         "The numbers above use single-account ending-value sizing. The two corrections below "
-        "give the final recommendation (matches PDF Section 2): (1) **Bonferroni p/2** per account "
-        "for joint stockout coverage, and (2) **running maximum** within window for mid-window stockouts."
+        "give the final recommendation: (1) **Bonferroni p/2** per account for joint stockout, "
+        "and (2) **running maximum** within window for mid-window stockouts. "
+        "**These update live with the sliders above.**"
     )
+
+    @st.cache_data(show_spinner=False)
+    def run_monte_carlo_running_max(lam_mx_us, lam_us_mx, mu_log, sigma_log, T, n_sims=20_000, seed=42):
+        """Compute running maximum of cumulative drain within each window."""
+        rng = np.random.default_rng(seed)
+        usd_max = np.zeros(n_sims)
+        mxn_max = np.zeros(n_sims)
+
+        for i in range(n_sims):
+            n_mx_us = rng.poisson(lam_mx_us * T)
+            n_us_mx = rng.poisson(lam_us_mx * T)
+
+            t1 = np.sort(rng.uniform(0, T, n_mx_us))
+            t2 = np.sort(rng.uniform(0, T, n_us_mx))
+            a1 = rng.lognormal(mu_log, sigma_log, n_mx_us)
+            a2 = rng.lognormal(mu_log, sigma_log, n_us_mx)
+
+            # USD account: drains on MX→US (+), replenishes on US→MX (-)
+            events_usd = sorted(
+                [(t, +a) for t, a in zip(t1, a1)] + [(t, -a) for t, a in zip(t2, a2)]
+            )
+            cum = 0.0
+            mx = 0.0
+            for _, d in events_usd:
+                cum += d
+                if cum > mx:
+                    mx = cum
+            usd_max[i] = mx
+
+            # MXN account: opposite signs
+            events_mxn = sorted(
+                [(t, +a) for t, a in zip(t2, a2)] + [(t, -a) for t, a in zip(t1, a1)]
+            )
+            cum = 0.0
+            mx = 0.0
+            for _, d in events_mxn:
+                cum += d
+                if cum > mx:
+                    mx = cum
+            mxn_max[i] = mx
+
+        return usd_max, mxn_max
+
+    with st.spinner("Computing running-max Monte Carlo (20,000 paths)..."):
+        usd_run_max, mxn_run_max = run_monte_carlo_running_max(
+            lambda_mx_us, lambda_us_mx, mu_logamt, amount_sigma, T
+        )
+
+    # Apply Bonferroni p/2
+    p_marginal = target_p / 2.0
+    B_usd_final = max(0, np.quantile(usd_run_max, 1 - p_marginal))
+    B_mxn_final_usd = max(0, np.quantile(mxn_run_max, 1 - p_marginal))
+    SPOT_MXN_PER_USD = 17.5  # illustrative spot rate
+    B_mxn_final_native = B_mxn_final_usd * SPOT_MXN_PER_USD
+    total_final = B_usd_final + B_mxn_final_usd
 
     final_col1, final_col2, final_col3 = st.columns(3)
     with final_col1:
+        delta_pct = (B_usd_final / max(B_usd_mc, 1) - 1) * 100
         st.metric(
             "USD account buffer",
-            "$402,772",
-            delta=f"+8.8% vs ending-value MC",
+            f"${B_usd_final:,.0f}",
+            delta=f"{delta_pct:+.1f}% vs ending-value MC",
             delta_color="off"
         )
-        st.caption("MC with running max, z=3.29 (p/2)")
+        z_marginal_val = norm.ppf(1 - p_marginal)
+        st.caption(f"Running max + p/2 (z={z_marginal_val:.2f})")
     with final_col2:
         st.metric(
             "MXN account buffer",
-            "5,147,276 MXN",
-            delta=f"≈ $294,130 USD-equiv",
+            f"{B_mxn_final_native:,.0f} MXN",
+            delta=f"≈ ${B_mxn_final_usd:,.0f} USD-equiv",
             delta_color="off"
         )
-        st.caption("Same methodology, MXN account")
+        st.caption(f"Spot rate: {SPOT_MXN_PER_USD} MXN/USD")
     with final_col3:
         st.metric(
             "Total locked capital",
-            "$696,902",
+            f"${total_final:,.0f}",
             delta="USD-equivalent",
             delta_color="off"
         )
-        st.caption("Annual capital cost ~$49.5K")
+        # Use default rates (5%/10%) — actual capital cost computed in Section 9 with sliders
+        annual_carry_default = B_usd_final * 0.05 + B_mxn_final_usd * 0.10
+        st.caption(f"Annual capital cost ≈ ${annual_carry_default:,.0f} (at 5%/10%)")
 
     st.info(
-        "**Why these differ from the Section 2-3 numbers above**: "
-        "Sections 2-3 show the textbook formula (single account, ending value at marginal p) "
-        "as a teaching baseline. The final numbers here apply the two corrections needed "
-        "to actually answer the case question (joint stockout, mid-window deficit). "
-        "See PDF Section 2 for the derivation."
+        f"**Why these differ from the Section 2-3 numbers above**: "
+        f"Sections 2-3 show the textbook formula (single account, ending value at marginal p={target_p:.2%}) "
+        f"as a teaching baseline. The final numbers here apply two corrections: "
+        f"**Bonferroni p/2 = {p_marginal:.3%}** per account so that P(either runs out) ≤ p, "
+        f"and **running maximum within window** for mid-window stockouts. "
+        f"See PDF Section 2 for the derivation."
     )
 
     # Distribution plot

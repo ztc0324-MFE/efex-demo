@@ -1130,130 +1130,27 @@ with tab3:
     )
 
     # ---- Problem framing ----
-    with st.expander("📖 Executive summary — direct answers to all case questions", expanded=True):
+    with st.expander("📖 About this dashboard", expanded=True):
         st.markdown(
             r"""
-This summary gives **direct answers** to all three case questions using illustrative parameters
-(T=10 min, joint p=0.1%, λ_MX→US=3/min, λ_US→MX=2.5/min, median amount=\$8K, σ=0.7).
-Section references in parentheses point to the detailed analysis below.
+This is the **companion interactive dashboard** to the full case solution.
 
-> ⚠️ **Caveat on parameters**: All numerical inputs (λ₁, λ₂, median amount, σ, interest rates) are author-chosen illustrative defaults for demonstration. The original case does not provide them. Production calibration would require fitting to real transaction history.
+
+**Use this dashboard to**:
+- Adjust parameters (sliders below) and see buffer requirements update live
+- Validate the Monte Carlo simulation against the analytical formulas
+- Explore sensitivity to service-window length (5/10/30 min)
+- Explore time-of-day, capital cost, and borrow-vs-wire trade-offs
+
+> **Current recommended buffers** (default parameters, joint p=0.1%):
+> - **USD: \$402,772**
+> - **MXN: 5,147,276 MXN** (≈ \$294,130 USD-equivalent)
+> - **Total locked capital: \$696,902**
 >
-> 🔬 **Sizing methodology**: We use (1) the **Bonferroni union bound** (p/2 per account) so that P(either runs out) ≤ p, and (2) Monte Carlo on the **running maximum** within the window (not the ending value) so that mid-window stockouts are captured.
+> Numbers above use Bonferroni p/2 + running max within window (see PDF Section 2 for derivation).
 
----
-
-##### ❓ Question 1 — How much USD and MXN should MexChange hold?
-
-**Answer**: To keep the **joint** 10-minute stockout probability (either account runs out) below **0.1%**:
-
-- **USD account: hold \$402,772** (Monte Carlo with running max, p/2 per account via Bonferroni). *(See Sections 2-3)*
-- **MXN account: hold 5,147,276 MXN (≈ \$294,130 USD)** *(See Sections 2-3)*
-- **Total locked capital: \$696,902** USD-equivalent. *(See Section 10)*
-
-**Three corrections versus naive sizing**:
-
-1. **Bonferroni union bound** — to keep P(either out) ≤ p = 0.1%, each account is sized at p/2 = 0.05%. This means z = 3.29 instead of 3.09 (+5.5% to buffer).
-2. **Running max within window** — stockouts can occur mid-window, not just at the end. Monte Carlo tracks the maximum cumulative drain inside [0, T], adding ~1.5-3% to the buffer.
-3. **Monte Carlo for tail** — captures compound Poisson heavy tails that Normal approximation underestimates.
-
-The buffer scales with the **z-score of the marginal target stockout probability** (p/2):
-
-- joint p = 1% → marginal 0.5% → z = 2.58 → buffer ≈ \$307K
-- **joint p = 0.1% → marginal 0.05% → z = 3.29 → buffer ≈ \$403K** (recommendation)
-- joint p = 0.01% → marginal 0.005% → z = 3.89 → buffer ≈ \$464K
-
-Tightening joint p from 1% to 0.1% increases buffer by ~31%.
-
----
-
-##### ❓ Question 2 — How to implement the policy?
-
-The case lists 7 sub-questions. Each has a concrete answer:
-
-**(1) Arrival model** — **Compound Poisson** with λ_MX→US = 3 transactions/min, λ_US→MX = 2.5 transactions/min.
-Customer behavior matches the four Poisson conditions: independent customers, rare events per individual,
-stable rate over short windows, memoryless inter-arrival times. *(See Sections 2-3)*
-
-**(2) Amount distribution** — **Log-normal** with median \$8K, σ=0.7 (E[X]=\$10,221, E[X²]=\$170M).
-Chosen over Pareto (heavier tail, harder to calibrate) and Gamma (lighter tail, underestimates large clients).
-B2B payment sizes are multiplicative processes, so log-normal is the empirical standard. *(See Section 5)*
-
-**(3) Direction model** — **Two independent Poisson streams**, one per direction.
-Independence is reasonable because customer decisions on each side aren't coordinated.
-Daily counts: ~1,440 MX→US transactions, ~1,200 US→MX transactions over an 8-hour business day. *(See Sections 2-3)*
-
-**(4) Net imbalance** — **Yes, systematic imbalance exists**: average daily drift is **+\$2,543,756 in favor of USD drain**
-(USD account drains faster than it replenishes). The 95th percentile end-of-day gap reaches **+\$4,084,260**.
-This means **MexChange needs scheduled cross-border rebalancing roughly once per business day**, not just reactive
-rebalancing when buffer is breached. *(See Section 6)*
-
-**(5) Max deficit distribution in 10-min window** — Distribution is approximately **bell-shaped with a right tail**.
-Mean = \$51,105 net USD outflow per 10-min window; standard deviation = \$96,845.
-The 99.9% quantile (our buffer cutoff) is at \$370,248. *(See Section 3, histogram chart)*
-
-**(6) Time-of-day effects** — **Significant**: arrival rates vary roughly **5x to 20x** between off-hours and peak.
-Required buffer at noon peak hour = **\$541,007** (+54% above static); at 1am off-hour = **\$69,475** (-80% below static).
-A static buffer of \$350K **over-provisions overnight by ~80%** and **under-provisions at peak by ~54%**.
-**Recommendation: implement a time-varying buffer policy**. *(See Section 7)*
-
-**(7) Interest rate role** — Interest rate determines **when to borrow vs wire**:
-
-- Local borrow (5 min) cost = deficit × local rate × duration. Cheap for short-duration deficits.
-- Cross-border wire (1 hr) cost = fixed \$75 fee. Cheap for large persistent deficits.
-- **Crossover**: borrowing is cheaper than wiring up to **\$756K** (USD account, 5% rate) or **\$378K** (MXN account, 10% rate) for a 4-hour deficit.
-- Above those amounts, **wire across borders**. For sustained structural imbalance, **adjust customer spreads** to shift demand. *(See Sections 8-9)*
-
----
-
-##### ❓ Question 3 — Risks of changing the service-level promise?
-
-**(A) Moving from 10 minutes to 30 minutes (matching competitors)**:
-
-- **Required USD buffer rises from \$403K to \$770K** — a **+92% increase** (under immediate-settlement assumption). *(See Section 4)*
-- Variance scales **linearly with window length**, so buffer scales as **√T**.
-- **MexChange loses its core competitive differentiator** (speed).
-- Estimated **additional annual capital cost** at 5% rate: ~\$18K on the USD buffer alone (similar MXN-side cost).
-
-> **Important nuance**: The +92% buffer assumes **immediate settlement** of every transaction. A 30-min window also allows **in-window netting** — a \$50K MX→US at minute 5 and a \$45K US→MX at minute 20 can be netted before cross-border movement. Under **delayed batching logic**, 30 min may reduce operational urgency rather than increase capital needs.
->
-> **Either way**, 30 min loses the speed differentiator without unambiguous operational gain.
-
-- **Conclusion: not recommended.** Under immediate-settlement: strictly worse. Under batching: marginal at best.
-
-**(B) Moving from 10 minutes to 5 minutes (faster than current)**:
-
-- **Required USD buffer drops from \$403K to \$272K** — a **-32% decrease**. *(See Section 4)*
-- Saves ~\$6,550/year on USD buffer capital cost at 5% rate.
-- **But**: monitoring frequency must double, batching window halves, **operational pressure increases significantly**.
-- Higher chance of cascade failures if monitoring lags.
-- **Conclusion: worth doing if operations can support the cadence — pure capital efficiency win, but only if ops infrastructure is ready.**
-
----
-
-##### 🧮 The math behind the buffer
-
-**Model**: Compound Poisson arrivals + log-normal amounts.
-- **N(T) ~ Poisson(λT)** — number of arrivals in window T
-- **X_i ~ LogNormal(μ, σ)** — amount of each transaction in USD
-
-**Buffer formula** (via Wald's identity for compound Poisson moments + Normal approximation):
-
-```
-E[Net drain]   = T × (λ_MX→US - λ_US→MX) × E[X]
-               = 10 × (3.0 - 2.5) × 10,221
-               = 51,105 USD
-
-Var[Net drain] = T × (λ_MX→US + λ_US→MX) × E[X²]
-               = 10 × (3.0 + 2.5) × 170,525,199
-               = 9,378,885,945 USD²
-
-Buffer = E[Net drain] + z_(1-p) × sqrt(Var[Net drain])
-       = 51,105 + 3.09 × 96,845
-       = 350,377 USD   (analytical answer)
-```
-
-Monte Carlo with 10,000 paths gives **\$370,248** (+5.7% vs Normal approx, reflecting heavier tails of compound Poisson). **Use the Monte Carlo number for the policy decision** — it's the conservative one.
+⚠️ **Note on parameters**: defaults are illustrative; production would calibrate
+to real MexChange transaction history.
 """
         )
 

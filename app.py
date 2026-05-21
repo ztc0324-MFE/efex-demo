@@ -1134,7 +1134,8 @@ with tab3:
         st.markdown(
             r"""
 This is the **companion interactive dashboard** to the full case solution.
-
+The complete writeup (with all math, derivations, and analysis) is in the LaTeX PDF
+submitted alongside this demo.
 
 **Use this dashboard to**:
 - Adjust parameters (sliders below) and see buffer requirements update live
@@ -1341,6 +1342,49 @@ to real MexChange transaction history.
         "Small differences between Normal-approx and Monte Carlo arise from "
         "the heavier tails of the compound Poisson when arrival counts are moderate. "
         "Monte Carlo is the more conservative — and trusted — number for production."
+    )
+
+    # ===== Final recommended (Bonferroni + running max) =====
+    st.markdown("---")
+    st.markdown("##### 🎯 Final recommended sizing (Bonferroni p/2 + running max)")
+    st.caption(
+        "The numbers above use single-account ending-value sizing. The two corrections below "
+        "give the final recommendation (matches PDF Section 2): (1) **Bonferroni p/2** per account "
+        "for joint stockout coverage, and (2) **running maximum** within window for mid-window stockouts."
+    )
+
+    final_col1, final_col2, final_col3 = st.columns(3)
+    with final_col1:
+        st.metric(
+            "USD account buffer",
+            "$402,772",
+            delta=f"+8.8% vs ending-value MC",
+            delta_color="off"
+        )
+        st.caption("MC with running max, z=3.29 (p/2)")
+    with final_col2:
+        st.metric(
+            "MXN account buffer",
+            "5,147,276 MXN",
+            delta=f"≈ $294,130 USD-equiv",
+            delta_color="off"
+        )
+        st.caption("Same methodology, MXN account")
+    with final_col3:
+        st.metric(
+            "Total locked capital",
+            "$696,902",
+            delta="USD-equivalent",
+            delta_color="off"
+        )
+        st.caption("Annual capital cost ~$49.5K")
+
+    st.info(
+        "**Why these differ from the Section 2-3 numbers above**: "
+        "Sections 2-3 show the textbook formula (single account, ending value at marginal p) "
+        "as a teaching baseline. The final numbers here apply the two corrections needed "
+        "to actually answer the case question (joint stockout, mid-window deficit). "
+        "See PDF Section 2 for the derivation."
     )
 
     # Distribution plot

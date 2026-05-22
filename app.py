@@ -2,9 +2,6 @@
 EFEX Payment Flow Monitor & AML Detection
 A sketch tool for cross-border B2B account-to-account payment risk monitoring.
 
-Built as follow-up to the discussion with Dimitri Zaninovich, May 2026.
-Focus: payment flow mapping + AML/fraud detection layer + treasury linkage.
-
 Author: Tianchi (Alex) Zhang
 """
 
@@ -1440,7 +1437,7 @@ to real MexChange transaction history.
 
     st.info(
         f"**Why these differ from the Section 2-3 numbers above**: "
-        f"Sections 2-3 show the textbook formula (single account, ending value at marginal p={target_p:.2%}) "
+        f"Sections 2-3 show the single account, ending value at marginal p={target_p:.2%} "
         f"as a teaching baseline. The final numbers here apply two corrections: "
         f"**Bonferroni p/2 = {p_marginal:.3%}** per account so that P(either runs out) ≤ p, "
         f"and **running maximum within window** for mid-window stockouts. "
@@ -2000,24 +1997,6 @@ ELSE (extreme shortfall):
 | MXN account (MX) | **{B_mxn_native_analytic:,.0f} MXN** (≈ ${B_mxn_in_usd_analytic:,.0f}) | MXN |
 | **Total locked capital** | **${B_usd_analytic + B_mxn_in_usd_analytic:,.0f}** | USD-equivalent |
 
-**Implementation requirements:**
-
-1. **Real-time balance monitoring** — sub-second polling on both accounts, with alerts when balance approaches buffer floor.
-
-2. **Rebalance triggers** — when projected balance in the next window falls below buffer:
-   - First, attempt local borrow (5 min, costs local rate)
-   - If local borrow unavailable, initiate cross-border wire (1 hr, ~$75 + slippage)
-
-3. **Flow forecasting** — short-horizon (next 10 min) forecast of MX→US vs US→MX volume.
-   Use exponential smoothing on recent arrival rates; refresh every minute.
-
-4. **Time-of-day adjustments** — arrival rates likely vary by hour (e.g., higher during overlapping business hours
-   ~9am–2pm PST when both Mexico and US are active). Buffers should be **time-varying**, not static.
-
-5. **Currency-pair rebalancing** — when imbalances persist, decide between:
-   - Cross-border wire (operational cost)
-   - Local borrow at high rate (financial cost)
-   - Adjusting customer-facing spreads to shift demand (revenue-side lever)
 
 **Key risk levers from this model:**
 
